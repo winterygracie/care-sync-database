@@ -1,0 +1,887 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Registered system staff user profile and role assignment for Ampayon CareSync.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Firebase Authentication user ID."
+        },
+        "fullName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 120,
+          "description": "Full display name of the staff member."
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "minLength": 3,
+          "maxLength": 180,
+          "description": "Staff email address."
+        },
+        "role": {
+          "type": "string",
+          "enum": ["Doctor", "Nurse", "BHW", "Administrative Clerk", "Data Controller", "Midwife"],
+          "description": "Assigned clinical or administrative role."
+        },
+        "accountStatus": {
+          "type": "string",
+          "enum": ["active", "inactive"],
+          "description": "Whether the staff account is permitted to access the system."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the account was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the account was last updated."
+        },
+        "lastLogin": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of the user's latest login."
+        }
+      },
+      "required": ["uid", "fullName", "email", "role", "accountStatus", "createdAt", "updatedAt", "lastLogin"]
+    },
+    "StaffProfile": {
+      "title": "StaffProfile",
+      "description": "Non-PII staff directory entry used to resolve staff names and roles across clinical workflows without exposing email addresses.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "fullName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 120
+        },
+        "role": {
+          "type": "string",
+          "enum": ["Doctor", "Nurse", "BHW", "Administrative Clerk", "Data Controller", "Midwife"]
+        },
+        "accountStatus": {
+          "type": "string",
+          "enum": ["active", "inactive"]
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "fullName", "role", "accountStatus", "updatedAt"]
+    },
+    "Patient": {
+      "title": "Patient",
+      "description": "Registered patient demographic profile with duplicate-detection metadata.",
+      "type": "object",
+      "properties": {
+        "patientId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Unique human-readable patient identifier."
+        },
+        "firstName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "middleName": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 80
+        },
+        "lastName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "normalizedKey": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 180,
+          "description": "Lowercase trimmed composite key: firstName|lastName|dateOfBirth."
+        },
+        "dateOfBirth": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 10,
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "sex": {
+          "type": "string",
+          "enum": ["Male", "Female", "Other"]
+        },
+        "address": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 250
+        },
+        "contactNumber": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 30
+        },
+        "emergencyContact": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 150
+        },
+        "registrationDate": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 10,
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "registeredBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "duplicateStatus": {
+          "type": "string",
+          "enum": ["clear", "flagged", "confirmed_unique", "confirmed_duplicate"]
+        },
+        "possibleDuplicateOf": {
+          "type": "array",
+          "description": "Up to 10 matched patientIds flagged during registration."
+        },
+        "duplicateReviewedBy": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 128
+        },
+        "duplicateReviewedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "patientId",
+        "firstName",
+        "middleName",
+        "lastName",
+        "normalizedKey",
+        "dateOfBirth",
+        "sex",
+        "address",
+        "contactNumber",
+        "emergencyContact",
+        "registrationDate",
+        "registeredBy",
+        "duplicateStatus",
+        "possibleDuplicateOf",
+        "duplicateReviewedBy",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "MedicalRecord": {
+      "title": "MedicalRecord",
+      "description": "Longitudinal patient clinical summary including conditions, allergies, medications, and maternal health notes.",
+      "type": "object",
+      "properties": {
+        "recordId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "patientId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "medicalConditions": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 2000
+        },
+        "allergies": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 1000
+        },
+        "medications": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 2000
+        },
+        "medicalHistory": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 4000
+        },
+        "maternalHealthNotes": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 2000
+        },
+        "notes": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 2000
+        },
+        "createdBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "recordId",
+        "patientId",
+        "medicalConditions",
+        "allergies",
+        "medications",
+        "medicalHistory",
+        "maternalHealthNotes",
+        "notes",
+        "createdBy",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Visit": {
+      "title": "Visit",
+      "description": "Individual clinical consultation and treatment record appended to a patient profile.",
+      "type": "object",
+      "properties": {
+        "visitId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "patientId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "visitDate": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 10,
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "symptoms": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "diagnosis": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 2000
+        },
+        "prescribedTreatment": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 2000
+        },
+        "notes": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 2000
+        },
+        "recordedBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "visitId",
+        "patientId",
+        "visitDate",
+        "symptoms",
+        "diagnosis",
+        "prescribedTreatment",
+        "notes",
+        "recordedBy",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "VitalSign": {
+      "title": "VitalSign",
+      "description": "Patient physiological measurements and clinical observations.",
+      "type": "object",
+      "properties": {
+        "vitalId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "patientId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "visitId": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 128
+        },
+        "bloodPressure": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 30
+        },
+        "temperature": {
+          "type": "number",
+          "description": "Body temperature in Celsius."
+        },
+        "heartRate": {
+          "type": "number",
+          "description": "Pulse rate in bpm."
+        },
+        "respiratoryRate": {
+          "type": "number",
+          "description": "Breaths per minute."
+        },
+        "weight": {
+          "type": "number",
+          "description": "Weight in kilograms."
+        },
+        "height": {
+          "type": "number",
+          "description": "Height in centimeters."
+        },
+        "otherMeasurements": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 500
+        },
+        "notes": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 1000
+        },
+        "recordedBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "recordedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "vitalId",
+        "patientId",
+        "visitId",
+        "bloodPressure",
+        "temperature",
+        "heartRate",
+        "respiratoryRate",
+        "weight",
+        "height",
+        "otherMeasurements",
+        "notes",
+        "recordedBy",
+        "recordedAt"
+      ]
+    },
+    "Appointment": {
+      "title": "Appointment",
+      "description": "Scheduled patient consultation or follow-up appointment.",
+      "type": "object",
+      "properties": {
+        "appointmentId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "patientId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "patientName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "appointmentDate": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 10,
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "appointmentTime": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 10
+        },
+        "appointmentType": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "purpose": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "status": {
+          "type": "string",
+          "enum": ["scheduled", "completed", "cancelled", "missed"]
+        },
+        "notes": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 1000
+        },
+        "createdBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "updatedBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "appointmentId",
+        "patientId",
+        "patientName",
+        "appointmentDate",
+        "appointmentTime",
+        "appointmentType",
+        "purpose",
+        "status",
+        "notes",
+        "createdBy",
+        "updatedBy",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "InventoryItem": {
+      "title": "InventoryItem",
+      "description": "Master catalog record for medical supplies and pharmaceuticals.",
+      "type": "object",
+      "properties": {
+        "itemId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "itemName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 150
+        },
+        "category": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "description": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 500
+        },
+        "unit": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "totalQuantity": {
+          "type": "number"
+        },
+        "minimumStockLevel": {
+          "type": "number"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "itemId",
+        "itemName",
+        "category",
+        "description",
+        "unit",
+        "totalQuantity",
+        "minimumStockLevel",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "InventoryBatch": {
+      "title": "InventoryBatch",
+      "description": "Batch-level supply lot supporting First Expired, First Out (FEFO) dispensing.",
+      "type": "object",
+      "properties": {
+        "batchId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "itemId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "batchNumber": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "quantityReceived": {
+          "type": "number"
+        },
+        "remainingQuantity": {
+          "type": "number"
+        },
+        "expirationDate": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 10,
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "dateReceived": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 10,
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "receivedBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "batchId",
+        "itemId",
+        "batchNumber",
+        "quantityReceived",
+        "remainingQuantity",
+        "expirationDate",
+        "dateReceived",
+        "receivedBy",
+        "createdAt"
+      ]
+    },
+    "InventoryTransaction": {
+      "title": "InventoryTransaction",
+      "description": "Immutable ledger entry for inventory receiving, FEFO dispensing, and stock adjustments.",
+      "type": "object",
+      "properties": {
+        "transactionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "itemId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "batchId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "transactionType": {
+          "type": "string",
+          "enum": ["received", "dispensed", "stock_adjustment"]
+        },
+        "quantity": {
+          "type": "number"
+        },
+        "previousQuantity": {
+          "type": "number"
+        },
+        "newQuantity": {
+          "type": "number"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "reference": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 150
+        },
+        "performedBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "transactionId",
+        "itemId",
+        "batchId",
+        "transactionType",
+        "quantity",
+        "previousQuantity",
+        "newQuantity",
+        "reason",
+        "reference",
+        "performedBy",
+        "timestamp"
+      ]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "Targeted operational alert for next-day appointments, low-stock thresholds, and duplicate patient reviews.",
+      "type": "object",
+      "properties": {
+        "notificationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 150
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "notificationType": {
+          "type": "string",
+          "enum": ["appointment_followup", "low_stock", "duplicate_review", "system"]
+        },
+        "recipientRoles": {
+          "type": "array",
+          "description": "Target staff roles (1 to 6 items)."
+        },
+        "recipientUserIds": {
+          "type": "array",
+          "description": "Target staff user IDs (up to 50 items)."
+        },
+        "relatedRecordId": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 128
+        },
+        "isRead": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "notificationId",
+        "title",
+        "message",
+        "notificationType",
+        "recipientRoles",
+        "recipientUserIds",
+        "relatedRecordId",
+        "isRead",
+        "createdAt"
+      ]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Immutable activity audit record for compliance and security traceability.",
+      "type": "object",
+      "properties": {
+        "logId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "userId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "userName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "userRole": {
+          "type": "string",
+          "enum": ["Doctor", "Nurse", "BHW", "Administrative Clerk", "Data Controller", "Midwife"]
+        },
+        "actionType": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "affectedCollection": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "affectedRecordId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "logId",
+        "userId",
+        "userName",
+        "userRole",
+        "actionType",
+        "affectedCollection",
+        "affectedRecordId",
+        "description",
+        "timestamp"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{uid}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Private user account records including email and assigned RBAC role."
+    },
+    "/staffProfiles/{uid}": {
+      "schema": { "$ref": "#/entities/StaffProfile" },
+      "description": "Non-PII staff directory for displaying clinician names and targeting notifications."
+    },
+    "/patients/{patientId}": {
+      "schema": { "$ref": "#/entities/Patient" },
+      "description": "Master patient demographic profiles."
+    },
+    "/medicalRecords/{recordId}": {
+      "schema": { "$ref": "#/entities/MedicalRecord" },
+      "description": "Clinical medical history, allergies, medications, and maternal notes."
+    },
+    "/visits/{visitId}": {
+      "schema": { "$ref": "#/entities/Visit" },
+      "description": "Patient clinical consultations and prescribed treatments."
+    },
+    "/vitalSigns/{vitalId}": {
+      "schema": { "$ref": "#/entities/VitalSign" },
+      "description": "Patient vital sign measurements linked to patients and visits."
+    },
+    "/appointments/{appointmentId}": {
+      "schema": { "$ref": "#/entities/Appointment" },
+      "description": "Patient appointment schedule records."
+    },
+    "/inventory/{itemId}": {
+      "schema": { "$ref": "#/entities/InventoryItem" },
+      "description": "Medical supply catalog and aggregate quantities."
+    },
+    "/inventoryBatches/{batchId}": {
+      "schema": { "$ref": "#/entities/InventoryBatch" },
+      "description": "Batch-tracked supply inventory for FEFO enforcement."
+    },
+    "/inventoryTransactions/{transactionId}": {
+      "schema": { "$ref": "#/entities/InventoryTransaction" },
+      "description": "Immutable inventory ledger entries."
+    },
+    "/notifications/{notificationId}": {
+      "schema": { "$ref": "#/entities/Notification" },
+      "description": "Operational notifications targeted to authorized staff roles and users."
+    },
+    "/auditLogs/{logId}": {
+      "schema": { "$ref": "#/entities/AuditLog" },
+      "description": "Immutable system audit log entries."
+    }
+  }
+}

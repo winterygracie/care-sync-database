@@ -1,0 +1,665 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // Core Security Primitives
+    // -------------------------------------------------------------------------
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidDateStr(d) {
+      return d is string && d.size() == 10 && d.matches('^\\d{4}-\\d{2}-\\d{2}$');
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isBootstrappedAdmin() {
+      return isVerifiedUser() && request.auth.token.email == 'gracecarmelcupin@gmail.com';
+    }
+
+    function isValidRole(role) {
+      return role in ['Doctor', 'Nurse', 'BHW', 'Administrative Clerk', 'Data Controller', 'Midwife'];
+    }
+
+    function isValidAccountStatus(status) {
+      return status in ['active', 'inactive'];
+    }
+
+    function userDocExists() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isActiveStaff() {
+      return isBootstrappedAdmin() || (
+        isVerifiedUser() &&
+        userDocExists() &&
+        userDoc().accountStatus == 'active' &&
+        isValidRole(userDoc().role)
+      );
+    }
+
+    function hasAnyRole(allowedRoles) {
+      return isBootstrappedAdmin() || (
+        isActiveStaff() &&
+        userDoc().role in allowedRoles
+      );
+    }
+
+    function isDataController() {
+      return isBootstrappedAdmin() || (
+        isActiveStaff() &&
+        userDoc().role == 'Data Controller'
+      );
+    }
+
+    // -------------------------------------------------------------------------
+    // Entity Validation Blueprints (Anti-Update-Gap)
+    // -------------------------------------------------------------------------
+    function isValidUser(data, uid) {
+      return data.keys().hasAll(['uid', 'fullName', 'email', 'role', 'accountStatus', 'createdAt', 'updatedAt', 'lastLogin']) &&
+        data.keys().hasOnly(['uid', 'fullName', 'email', 'role', 'accountStatus', 'createdAt', 'updatedAt', 'lastLogin']) &&
+        isValidId(data.uid) &&
+        data.uid == uid &&
+        data.fullName is string && data.fullName.size() >= 2 && data.fullName.size() <= 120 &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 180 &&
+        isValidRole(data.role) &&
+        isValidAccountStatus(data.accountStatus) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp &&
+        data.lastLogin is timestamp;
+    }
+
+    function isValidStaffProfile(data, uid) {
+      return data.keys().hasAll(['uid', 'fullName', 'role', 'accountStatus', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'fullName', 'role', 'accountStatus', 'updatedAt']) &&
+        isValidId(data.uid) &&
+        data.uid == uid &&
+        data.fullName is string && data.fullName.size() >= 2 && data.fullName.size() <= 120 &&
+        isValidRole(data.role) &&
+        isValidAccountStatus(data.accountStatus) &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidPatient(data, patientId) {
+      return data.keys().hasAll([
+          'patientId', 'firstName', 'middleName', 'lastName', 'normalizedKey',
+          'dateOfBirth', 'sex', 'address', 'contactNumber', 'emergencyContact',
+          'registrationDate', 'registeredBy', 'duplicateStatus', 'possibleDuplicateOf',
+          'duplicateReviewedBy', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'patientId', 'firstName', 'middleName', 'lastName', 'normalizedKey',
+          'dateOfBirth', 'sex', 'address', 'contactNumber', 'emergencyContact',
+          'registrationDate', 'registeredBy', 'duplicateStatus', 'possibleDuplicateOf',
+          'duplicateReviewedBy', 'duplicateReviewedAt', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.patientId) &&
+        data.patientId == patientId &&
+        data.firstName is string && data.firstName.size() >= 1 && data.firstName.size() <= 80 &&
+        data.middleName is string && data.middleName.size() <= 80 &&
+        data.lastName is string && data.lastName.size() >= 1 && data.lastName.size() <= 80 &&
+        data.normalizedKey is string && data.normalizedKey.size() >= 3 && data.normalizedKey.size() <= 180 &&
+        isValidDateStr(data.dateOfBirth) &&
+        data.sex in ['Male', 'Female', 'Other'] &&
+        data.address is string && data.address.size() >= 1 && data.address.size() <= 250 &&
+        data.contactNumber is string && data.contactNumber.size() <= 30 &&
+        data.emergencyContact is string && data.emergencyContact.size() <= 150 &&
+        isValidDateStr(data.registrationDate) &&
+        isValidId(data.registeredBy) &&
+        data.duplicateStatus in ['clear', 'flagged', 'confirmed_unique', 'confirmed_duplicate'] &&
+        data.possibleDuplicateOf is list && data.possibleDuplicateOf.size() <= 10 &&
+        (data.possibleDuplicateOf.size() == 0 || (data.possibleDuplicateOf[0] is string && data.possibleDuplicateOf[0].size() <= 64)) &&
+        data.duplicateReviewedBy is string && data.duplicateReviewedBy.size() <= 128 &&
+        (!('duplicateReviewedAt' in data) || data.duplicateReviewedAt == null || data.duplicateReviewedAt is timestamp) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidMedicalRecord(data, recordId) {
+      return data.keys().hasAll([
+          'recordId', 'patientId', 'medicalConditions', 'allergies',
+          'medications', 'medicalHistory', 'maternalHealthNotes', 'notes',
+          'createdBy', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'recordId', 'patientId', 'medicalConditions', 'allergies',
+          'medications', 'medicalHistory', 'maternalHealthNotes', 'notes',
+          'createdBy', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.recordId) &&
+        data.recordId == recordId &&
+        isValidId(data.patientId) &&
+        data.medicalConditions is string && data.medicalConditions.size() <= 2000 &&
+        data.allergies is string && data.allergies.size() <= 1000 &&
+        data.medications is string && data.medications.size() <= 2000 &&
+        data.medicalHistory is string && data.medicalHistory.size() <= 4000 &&
+        data.maternalHealthNotes is string && data.maternalHealthNotes.size() <= 2000 &&
+        data.notes is string && data.notes.size() <= 2000 &&
+        isValidId(data.createdBy) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidVisit(data, visitId) {
+      return data.keys().hasAll([
+          'visitId', 'patientId', 'visitDate', 'symptoms',
+          'diagnosis', 'prescribedTreatment', 'notes',
+          'recordedBy', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'visitId', 'patientId', 'visitDate', 'symptoms',
+          'diagnosis', 'prescribedTreatment', 'notes',
+          'recordedBy', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.visitId) &&
+        data.visitId == visitId &&
+        isValidId(data.patientId) &&
+        isValidDateStr(data.visitDate) &&
+        data.symptoms is string && data.symptoms.size() >= 1 && data.symptoms.size() <= 2000 &&
+        data.diagnosis is string && data.diagnosis.size() <= 2000 &&
+        data.prescribedTreatment is string && data.prescribedTreatment.size() <= 2000 &&
+        data.notes is string && data.notes.size() <= 2000 &&
+        isValidId(data.recordedBy) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidVitalSign(data, vitalId) {
+      return data.keys().hasAll([
+          'vitalId', 'patientId', 'visitId', 'bloodPressure',
+          'temperature', 'heartRate', 'respiratoryRate', 'weight', 'height',
+          'otherMeasurements', 'notes', 'recordedBy', 'recordedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'vitalId', 'patientId', 'visitId', 'bloodPressure',
+          'temperature', 'heartRate', 'respiratoryRate', 'weight', 'height',
+          'otherMeasurements', 'notes', 'recordedBy', 'recordedAt'
+        ]) &&
+        isValidId(data.vitalId) &&
+        data.vitalId == vitalId &&
+        isValidId(data.patientId) &&
+        data.visitId is string && data.visitId.size() <= 128 &&
+        data.bloodPressure is string && data.bloodPressure.size() <= 30 &&
+        (data.temperature == null || (data.temperature is number && data.temperature >= 25 && data.temperature <= 46)) &&
+        (data.heartRate == null || (data.heartRate is number && data.heartRate >= 20 && data.heartRate <= 260)) &&
+        (data.respiratoryRate == null || (data.respiratoryRate is number && data.respiratoryRate >= 5 && data.respiratoryRate <= 80)) &&
+        (data.weight == null || (data.weight is number && data.weight >= 0.5 && data.weight <= 400)) &&
+        (data.height == null || (data.height is number && data.height >= 20 && data.height <= 260)) &&
+        data.otherMeasurements is string && data.otherMeasurements.size() <= 500 &&
+        data.notes is string && data.notes.size() <= 1000 &&
+        isValidId(data.recordedBy) &&
+        data.recordedAt is timestamp;
+    }
+
+    function isValidAppointment(data, appointmentId) {
+      return data.keys().hasAll([
+          'appointmentId', 'patientId', 'patientName', 'appointmentDate',
+          'appointmentTime', 'appointmentType', 'purpose', 'status',
+          'notes', 'createdBy', 'updatedBy', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'appointmentId', 'patientId', 'patientName', 'appointmentDate',
+          'appointmentTime', 'appointmentType', 'purpose', 'status',
+          'notes', 'createdBy', 'updatedBy', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.appointmentId) &&
+        data.appointmentId == appointmentId &&
+        isValidId(data.patientId) &&
+        data.patientName is string && data.patientName.size() >= 1 && data.patientName.size() <= 160 &&
+        isValidDateStr(data.appointmentDate) &&
+        data.appointmentTime is string && data.appointmentTime.size() >= 4 && data.appointmentTime.size() <= 10 &&
+        data.appointmentType is string && data.appointmentType.size() >= 1 && data.appointmentType.size() <= 80 &&
+        data.purpose is string && data.purpose.size() >= 1 && data.purpose.size() <= 500 &&
+        data.status in ['scheduled', 'completed', 'cancelled', 'missed'] &&
+        data.notes is string && data.notes.size() <= 1000 &&
+        isValidId(data.createdBy) &&
+        isValidId(data.updatedBy) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidInventoryItem(data, itemId) {
+      return data.keys().hasAll([
+          'itemId', 'itemName', 'category', 'description', 'unit',
+          'totalQuantity', 'minimumStockLevel', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'itemId', 'itemName', 'category', 'description', 'unit',
+          'totalQuantity', 'minimumStockLevel', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.itemId) &&
+        data.itemId == itemId &&
+        data.itemName is string && data.itemName.size() >= 1 && data.itemName.size() <= 150 &&
+        data.category is string && data.category.size() >= 1 && data.category.size() <= 80 &&
+        data.description is string && data.description.size() <= 500 &&
+        data.unit is string && data.unit.size() >= 1 && data.unit.size() <= 40 &&
+        data.totalQuantity is number && data.totalQuantity >= 0 &&
+        data.minimumStockLevel is number && data.minimumStockLevel >= 0 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidInventoryBatch(data, batchId) {
+      return data.keys().hasAll([
+          'batchId', 'itemId', 'batchNumber', 'quantityReceived',
+          'remainingQuantity', 'expirationDate', 'dateReceived', 'receivedBy', 'createdAt'
+        ]) &&
+        data.keys().hasOnly([
+          'batchId', 'itemId', 'batchNumber', 'quantityReceived',
+          'remainingQuantity', 'expirationDate', 'dateReceived', 'receivedBy', 'createdAt'
+        ]) &&
+        isValidId(data.batchId) &&
+        data.batchId == batchId &&
+        isValidId(data.itemId) &&
+        data.batchNumber is string && data.batchNumber.size() >= 1 && data.batchNumber.size() <= 80 &&
+        data.quantityReceived is number && data.quantityReceived > 0 &&
+        data.remainingQuantity is number && data.remainingQuantity >= 0 && data.remainingQuantity <= data.quantityReceived &&
+        isValidDateStr(data.expirationDate) &&
+        isValidDateStr(data.dateReceived) &&
+        isValidId(data.receivedBy) &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidInventoryTransaction(data, transactionId) {
+      return data.keys().hasAll([
+          'transactionId', 'itemId', 'batchId', 'transactionType',
+          'quantity', 'previousQuantity', 'newQuantity', 'reason',
+          'reference', 'performedBy', 'timestamp'
+        ]) &&
+        data.keys().hasOnly([
+          'transactionId', 'itemId', 'batchId', 'transactionType',
+          'quantity', 'previousQuantity', 'newQuantity', 'reason',
+          'reference', 'performedBy', 'timestamp'
+        ]) &&
+        isValidId(data.transactionId) &&
+        data.transactionId == transactionId &&
+        isValidId(data.itemId) &&
+        isValidId(data.batchId) &&
+        data.transactionType in ['received', 'dispensed', 'stock_adjustment'] &&
+        data.quantity is number && data.quantity != 0 &&
+        data.previousQuantity is number && data.previousQuantity >= 0 &&
+        data.newQuantity is number && data.newQuantity >= 0 &&
+        data.reason is string && data.reason.size() >= 1 && data.reason.size() <= 300 &&
+        data.reference is string && data.reference.size() <= 150 &&
+        isValidId(data.performedBy) &&
+        data.timestamp is timestamp;
+    }
+
+    function isValidNotification(data, notificationId) {
+      return data.keys().hasAll([
+          'notificationId', 'title', 'message', 'notificationType',
+          'recipientRoles', 'recipientUserIds', 'relatedRecordId', 'isRead', 'createdAt'
+        ]) &&
+        data.keys().hasOnly([
+          'notificationId', 'title', 'message', 'notificationType',
+          'recipientRoles', 'recipientUserIds', 'relatedRecordId', 'isRead', 'createdAt'
+        ]) &&
+        isValidId(data.notificationId) &&
+        data.notificationId == notificationId &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 150 &&
+        data.message is string && data.message.size() >= 1 && data.message.size() <= 1000 &&
+        data.notificationType in ['appointment_followup', 'low_stock', 'duplicate_review', 'system'] &&
+        data.recipientRoles is list && data.recipientRoles.size() >= 1 && data.recipientRoles.size() <= 6 &&
+        data.recipientRoles.hasOnly(['Doctor', 'Nurse', 'BHW', 'Administrative Clerk', 'Data Controller', 'Midwife']) &&
+        data.recipientUserIds is list && data.recipientUserIds.size() <= 50 &&
+        (data.recipientUserIds.size() == 0 || (data.recipientUserIds[0] is string && data.recipientUserIds[0].size() <= 128)) &&
+        data.relatedRecordId is string && data.relatedRecordId.size() <= 128 &&
+        data.isRead is bool &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidAuditLog(data, logId) {
+      return data.keys().hasAll([
+          'logId', 'userId', 'userName', 'userRole', 'actionType',
+          'affectedCollection', 'affectedRecordId', 'description', 'timestamp'
+        ]) &&
+        data.keys().hasOnly([
+          'logId', 'userId', 'userName', 'userRole', 'actionType',
+          'affectedCollection', 'affectedRecordId', 'description', 'timestamp'
+        ]) &&
+        isValidId(data.logId) &&
+        data.logId == logId &&
+        isValidId(data.userId) &&
+        data.userName is string && data.userName.size() >= 1 && data.userName.size() <= 120 &&
+        isValidRole(data.userRole) &&
+        data.actionType is string && data.actionType.size() >= 1 && data.actionType.size() <= 80 &&
+        data.affectedCollection is string && data.affectedCollection.size() >= 1 && data.affectedCollection.size() <= 60 &&
+        data.affectedRecordId is string && data.affectedRecordId.size() >= 1 && data.affectedRecordId.size() <= 128 &&
+        data.description is string && data.description.size() >= 1 && data.description.size() <= 1000 &&
+        data.timestamp is timestamp;
+    }
+
+    // -------------------------------------------------------------------------
+    // Collection Rules
+    // -------------------------------------------------------------------------
+
+    // Connection test document
+    match /test/connection {
+      allow get: if isSignedIn();
+      allow list, write: if false;
+    }
+
+    // Users (PII-isolated: only owner or Data Controller / Bootstrapped Admin)
+    match /users/{uid} {
+      allow get: if isValidId(uid) && isVerifiedUser() && (
+        request.auth.uid == uid || isDataController()
+      );
+      allow list: if isVerifiedUser() && (
+        isBootstrappedAdmin() || resource.data.uid == request.auth.uid || isDataController()
+      );
+      allow create: if isValidId(uid) && isVerifiedUser() && isValidUser(incoming(), uid) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        incoming().lastLogin == request.time && (
+          isDataController() ||
+          (
+            request.auth.uid == uid &&
+            incoming().email == request.auth.token.email &&
+            incoming().role == 'BHW' &&
+            incoming().accountStatus == 'inactive'
+          )
+        );
+      allow update: if isValidId(uid) && isVerifiedUser() && isValidUser(incoming(), uid) &&
+        incoming().uid == existing().uid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          (isDataController() && incoming().diff(existing()).affectedKeys().hasOnly(['fullName', 'role', 'accountStatus', 'updatedAt', 'lastLogin'])) ||
+          (request.auth.uid == uid &&
+            incoming().role == existing().role &&
+            incoming().accountStatus == existing().accountStatus &&
+            incoming().email == existing().email &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['fullName', 'updatedAt', 'lastLogin']))
+        );
+      allow delete: if false;
+    }
+
+    // Non-PII Staff Directory
+    match /staffProfiles/{uid} {
+      allow get: if isValidId(uid) && isActiveStaff();
+      allow list: if isVerifiedUser() && (
+        isBootstrappedAdmin() ||
+        (resource.data.accountStatus in ['active', 'inactive'] && isActiveStaff())
+      );
+      allow create: if isValidId(uid) && isVerifiedUser() && isValidStaffProfile(incoming(), uid) &&
+        incoming().updatedAt == request.time && (
+          isDataController() ||
+          (request.auth.uid == uid && incoming().role == 'BHW' && incoming().accountStatus == 'inactive')
+        );
+      allow update: if isValidId(uid) && isVerifiedUser() && isValidStaffProfile(incoming(), uid) &&
+        incoming().uid == existing().uid &&
+        incoming().updatedAt == request.time && (
+          (isDataController() && incoming().diff(existing()).affectedKeys().hasOnly(['fullName', 'role', 'accountStatus', 'updatedAt'])) ||
+          (request.auth.uid == uid &&
+            incoming().role == existing().role &&
+            incoming().accountStatus == existing().accountStatus &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['fullName', 'updatedAt']))
+        );
+      allow delete: if false;
+    }
+
+    // Patients
+    match /patients/{patientId} {
+      allow get: if isValidId(patientId) && isActiveStaff();
+      allow list: if isActiveStaff();
+      allow create: if isValidId(patientId) && isActiveStaff() &&
+        isValidPatient(incoming(), patientId) &&
+        incoming().registeredBy == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isValidId(patientId) && isActiveStaff() &&
+        isValidPatient(incoming(), patientId) &&
+        incoming().patientId == existing().patientId &&
+        incoming().registeredBy == existing().registeredBy &&
+        incoming().registrationDate == existing().registrationDate &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          (hasAnyRole(['BHW', 'Nurse', 'Doctor', 'Midwife', 'Data Controller']) &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'firstName', 'middleName', 'lastName', 'normalizedKey',
+              'dateOfBirth', 'sex', 'address', 'contactNumber', 'emergencyContact', 'updatedAt'
+            ])) ||
+          (hasAnyRole(['Data Controller', 'Doctor', 'Nurse', 'BHW']) &&
+            (existing().duplicateStatus == 'flagged' || isDataController()) &&
+            incoming().duplicateReviewedBy == request.auth.uid &&
+            incoming().duplicateReviewedAt == request.time &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'duplicateStatus', 'duplicateReviewedBy', 'duplicateReviewedAt', 'updatedAt'
+            ]))
+        );
+      allow delete: if false;
+    }
+
+    // Medical Records (Clinical Staff + Data Controller only)
+    match /medicalRecords/{recordId} {
+      allow get: if isValidId(recordId) && hasAnyRole(['Doctor', 'Nurse', 'Midwife', 'Data Controller']);
+      allow list: if hasAnyRole(['Doctor', 'Nurse', 'Midwife', 'Data Controller']);
+      allow create: if isValidId(recordId) && hasAnyRole(['Doctor', 'Nurse', 'Midwife', 'Data Controller']) &&
+        isValidMedicalRecord(incoming(), recordId) &&
+        incoming().createdBy == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        existsAfter(/databases/$(database)/documents/patients/$(incoming().patientId));
+      allow update: if isValidId(recordId) && hasAnyRole(['Doctor', 'Nurse', 'Midwife', 'Data Controller']) &&
+        isValidMedicalRecord(incoming(), recordId) &&
+        incoming().recordId == existing().recordId &&
+        incoming().patientId == existing().patientId &&
+        incoming().createdBy == existing().createdBy &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'medicalConditions', 'allergies', 'medications',
+          'medicalHistory', 'maternalHealthNotes', 'notes', 'updatedAt'
+        ]);
+      allow delete: if false;
+    }
+
+    // Visits (Clinical Staff + Data Controller only)
+    match /visits/{visitId} {
+      allow get: if isValidId(visitId) && hasAnyRole(['Doctor', 'Nurse', 'Midwife', 'Data Controller']);
+      allow list: if hasAnyRole(['Doctor', 'Nurse', 'Midwife', 'Data Controller']);
+      allow create: if isValidId(visitId) && hasAnyRole(['Doctor', 'Nurse', 'Midwife', 'Data Controller']) &&
+        isValidVisit(incoming(), visitId) &&
+        incoming().recordedBy == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        existsAfter(/databases/$(database)/documents/patients/$(incoming().patientId));
+      allow update: if isValidId(visitId) && hasAnyRole(['Doctor', 'Nurse', 'Midwife', 'Data Controller']) &&
+        isValidVisit(incoming(), visitId) &&
+        incoming().visitId == existing().visitId &&
+        incoming().patientId == existing().patientId &&
+        incoming().recordedBy == existing().recordedBy &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'visitDate', 'symptoms', 'diagnosis', 'prescribedTreatment', 'notes', 'updatedAt'
+        ]);
+      allow delete: if false;
+    }
+
+    // Vital Signs (Clinical Staff + Data Controller only)
+    match /vitalSigns/{vitalId} {
+      allow get: if isValidId(vitalId) && hasAnyRole(['Doctor', 'Nurse', 'Midwife', 'Data Controller']);
+      allow list: if hasAnyRole(['Doctor', 'Nurse', 'Midwife', 'Data Controller']);
+      allow create: if isValidId(vitalId) && hasAnyRole(['Doctor', 'Nurse', 'Midwife', 'Data Controller']) &&
+        isValidVitalSign(incoming(), vitalId) &&
+        incoming().recordedBy == request.auth.uid &&
+        incoming().recordedAt == request.time &&
+        existsAfter(/databases/$(database)/documents/patients/$(incoming().patientId));
+      allow update: if isValidId(vitalId) && hasAnyRole(['Doctor', 'Nurse', 'Midwife', 'Data Controller']) &&
+        isValidVitalSign(incoming(), vitalId) &&
+        incoming().vitalId == existing().vitalId &&
+        incoming().patientId == existing().patientId &&
+        incoming().recordedBy == existing().recordedBy &&
+        incoming().recordedAt == existing().recordedAt &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'visitId', 'bloodPressure', 'temperature', 'heartRate',
+          'respiratoryRate', 'weight', 'height', 'otherMeasurements', 'notes'
+        ]);
+      allow delete: if false;
+    }
+
+    // Appointments (Terminal state locking on completed/cancelled)
+    match /appointments/{appointmentId} {
+      allow get: if isValidId(appointmentId) && isActiveStaff();
+      allow list: if isActiveStaff();
+      allow create: if isValidId(appointmentId) &&
+        hasAnyRole(['Administrative Clerk', 'Nurse', 'Doctor', 'Midwife', 'Data Controller']) &&
+        isValidAppointment(incoming(), appointmentId) &&
+        incoming().createdBy == request.auth.uid &&
+        incoming().updatedBy == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        existsAfter(/databases/$(database)/documents/patients/$(incoming().patientId));
+      allow update: if isValidId(appointmentId) &&
+        hasAnyRole(['Administrative Clerk', 'Nurse', 'Doctor', 'Midwife', 'Data Controller']) &&
+        isValidAppointment(incoming(), appointmentId) &&
+        incoming().appointmentId == existing().appointmentId &&
+        incoming().patientId == existing().patientId &&
+        incoming().createdBy == existing().createdBy &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedBy == request.auth.uid &&
+        incoming().updatedAt == request.time && (
+          (isDataController() && incoming().diff(existing()).affectedKeys().hasOnly([
+            'patientName', 'appointmentDate', 'appointmentTime', 'appointmentType',
+            'purpose', 'status', 'notes', 'updatedBy', 'updatedAt'
+          ])) ||
+          (!(existing().status in ['completed', 'cancelled']) &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'appointmentDate', 'appointmentTime', 'appointmentType',
+              'purpose', 'status', 'notes', 'updatedBy', 'updatedAt'
+            ]))
+        );
+      allow delete: if false;
+    }
+
+    // Inventory Items
+    match /inventory/{itemId} {
+      allow get: if isValidId(itemId) && isActiveStaff();
+      allow list: if isActiveStaff();
+      allow create: if isValidId(itemId) &&
+        hasAnyRole(['Administrative Clerk', 'Data Controller', 'Nurse']) &&
+        isValidInventoryItem(incoming(), itemId) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isValidId(itemId) && isValidInventoryItem(incoming(), itemId) &&
+        incoming().itemId == existing().itemId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          (hasAnyRole(['Administrative Clerk', 'Data Controller', 'Nurse']) &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'itemName', 'category', 'description', 'unit', 'minimumStockLevel', 'updatedAt'
+            ])) ||
+          (hasAnyRole(['Administrative Clerk', 'Data Controller', 'Nurse', 'Doctor', 'Midwife']) &&
+            incoming().totalQuantity >= 0 &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['totalQuantity', 'updatedAt']))
+        );
+      allow delete: if false;
+    }
+
+    // Inventory Batches (FEFO)
+    match /inventoryBatches/{batchId} {
+      allow get: if isValidId(batchId) && isActiveStaff();
+      allow list: if isActiveStaff();
+      allow create: if isValidId(batchId) &&
+        hasAnyRole(['Administrative Clerk', 'Data Controller', 'Nurse']) &&
+        isValidInventoryBatch(incoming(), batchId) &&
+        incoming().receivedBy == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        existsAfter(/databases/$(database)/documents/inventory/$(incoming().itemId));
+      allow update: if isValidId(batchId) &&
+        hasAnyRole(['Administrative Clerk', 'Data Controller', 'Nurse', 'Doctor', 'Midwife']) &&
+        isValidInventoryBatch(incoming(), batchId) &&
+        incoming().batchId == existing().batchId &&
+        incoming().itemId == existing().itemId &&
+        incoming().batchNumber == existing().batchNumber &&
+        incoming().quantityReceived == existing().quantityReceived &&
+        incoming().expirationDate == existing().expirationDate &&
+        incoming().dateReceived == existing().dateReceived &&
+        incoming().receivedBy == existing().receivedBy &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().remainingQuantity >= 0 &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['remainingQuantity']);
+      allow delete: if false;
+    }
+
+    // Inventory Transactions (Append-only immutable ledger)
+    match /inventoryTransactions/{transactionId} {
+      allow get: if isValidId(transactionId) &&
+        hasAnyRole(['Administrative Clerk', 'Data Controller', 'Nurse', 'Doctor', 'Midwife']);
+      allow list: if hasAnyRole(['Administrative Clerk', 'Data Controller', 'Nurse', 'Doctor', 'Midwife']);
+      allow create: if isValidId(transactionId) &&
+        hasAnyRole(['Administrative Clerk', 'Data Controller', 'Nurse', 'Doctor', 'Midwife']) &&
+        isValidInventoryTransaction(incoming(), transactionId) &&
+        incoming().performedBy == request.auth.uid &&
+        incoming().timestamp == request.time &&
+        existsAfter(/databases/$(database)/documents/inventory/$(incoming().itemId)) &&
+        existsAfter(/databases/$(database)/documents/inventoryBatches/$(incoming().batchId));
+      allow update, delete: if false;
+    }
+
+    // Notifications
+    match /notifications/{notificationId} {
+      allow get: if isValidId(notificationId) && isActiveStaff() && (
+        isDataController() ||
+        request.auth.uid in existing().recipientUserIds ||
+        userDoc().role in existing().recipientRoles
+      );
+      allow list: if isVerifiedUser() && (
+        isBootstrappedAdmin() ||
+        request.auth.uid in resource.data.recipientUserIds ||
+        (isActiveStaff() && userDoc().role in resource.data.recipientRoles)
+      );
+      allow create: if isValidId(notificationId) && isActiveStaff() &&
+        isValidNotification(incoming(), notificationId) &&
+        incoming().createdAt == request.time;
+      allow update: if isValidId(notificationId) && isActiveStaff() &&
+        isValidNotification(incoming(), notificationId) &&
+        (isDataController() || request.auth.uid in existing().recipientUserIds || userDoc().role in existing().recipientRoles) &&
+        incoming().notificationId == existing().notificationId &&
+        incoming().title == existing().title &&
+        incoming().message == existing().message &&
+        incoming().notificationType == existing().notificationType &&
+        incoming().recipientRoles == existing().recipientRoles &&
+        incoming().recipientUserIds == existing().recipientUserIds &&
+        incoming().relatedRecordId == existing().relatedRecordId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['isRead']);
+      allow delete: if false;
+    }
+
+    // Audit Logs (Append-only immutable, readable only by Data Controller / Bootstrapped Admin)
+    match /auditLogs/{logId} {
+      allow get: if isValidId(logId) && isDataController();
+      allow list: if isDataController();
+      allow create: if isValidId(logId) && isActiveStaff() &&
+        isValidAuditLog(incoming(), logId) &&
+        incoming().userId == request.auth.uid &&
+        incoming().timestamp == request.time;
+      allow update, delete: if false;
+    }
+  }
+}

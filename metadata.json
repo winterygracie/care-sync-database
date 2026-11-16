@@ -1,0 +1,6 @@
+{
+  "name": "Ampayon CareSync",
+  "description": "Healthcare information management system for Ampayon Super Health Center with role-based access, patient records, FEFO inventory, and offline-capable Firestore synchronization.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
